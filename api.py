@@ -2,18 +2,19 @@ import os
 import requests
 from flask import Flask, request, jsonify
 from datetime import datetime
+import time
 
 app = Flask(__name__)
 
 # 🔑 Teri API Key
 VALID_KEY = "@x_TRACEOWNER"
 
-# Original API details
+# 🔥 Original API details
 ORIGINAL_API_URL = "https://sbsakib.eu.cc/apis/num_info_v1"
 ORIGINAL_KEY = "Adarsh_Aman-paid"
 
-# 🔥 API Expiry Date (4 din — aaj included)
-API_EXPIRY = "2092-11-25"
+# 🔥 API Expiry Date (14 December 2099)
+API_EXPIRY = "2099-12-14"
 
 def is_expired():
     try:
@@ -43,7 +44,7 @@ def num_info():
     if is_expired():
         return jsonify({
             "status": False,
-            "error": f"API expired on {API_EXPIRY}! Please contact support.",
+            "error": f"API expired on {API_EXPIRY}!",
             "developer": "@x_TRACEOWNER",
             "credit": "@x_TRACEOWNER",
             "expires_on": API_EXPIRY
@@ -87,69 +88,103 @@ def num_info():
             "credit": "@x_TRACEOWNER"
         }), 400
     
-    # Forward to original API
-    params = {
-        'key': ORIGINAL_KEY,
-        'num': num
-    }
+    # 🔥 Retry logic — 3 attempts with 8 sec timeout
+    max_attempts = 3
+    last_error = None
     
-    try:
-        response = requests.get(ORIGINAL_API_URL, params=params, timeout=10)
-        response.raise_for_status()
-        data = response.json()
-        
-        # 🔥 Clean response
-        if isinstance(data, dict):
-            # Check if total_results is 0 (no data found)
-            if data.get('total_results') == 0:
-                return jsonify({
-                    "status": False,
-                    "message": "No data found",
-                    "developer": "@x_TRACEOWNER",
-                    "credit": "@x_TRACEOWNER"
-                }), 404
+    for attempt in range(max_attempts):
+        try:
+            params = {
+                'key': ORIGINAL_KEY,
+                'num': num
+            }
+            response = requests.get(ORIGINAL_API_URL, params=params, timeout=8)
             
-            # Remove original developer
-            data.pop('developer', None)
+            # Agar rate limit (429) ya server error (5xx) ho toh retry karo
+            if response.status_code == 429 or response.status_code >= 500:
+                last_error = "server_busy"
+                time.sleep(2)
+                continue
             
-            # Add our branding
-            data['developer'] = '@x_TRACEOWNER'
-            data['credit'] = '@x_TRACEOWNER'
-            data['api_expires_on'] = API_EXPIRY
+            response.raise_for_status()
+            data = response.json()
             
-        return jsonify(data)
-        
-    except requests.exceptions.Timeout:
-        return jsonify({
-            "status": False,
-            "message": "Request timeout. Please try again later.",
-            "developer": "@x_TRACEOWNER",
-            "credit": "@x_TRACEOWNER"
-        }), 504
-        
-    except requests.exceptions.ConnectionError:
-        return jsonify({
-            "status": False,
-            "message": "No data found",
-            "developer": "@x_TRACEOWNER",
-            "credit": "@x_TRACEOWNER"
-        }), 404
-        
-    except requests.exceptions.RequestException as e:
-        return jsonify({
-            "status": False,
-            "message": "No data found",
-            "developer": "@x_TRACEOWNER",
-            "credit": "@x_TRACEOWNER"
-        }), 404
-        
-    except Exception as e:
-        return jsonify({
-            "status": False,
-            "message": "No data found",
-            "developer": "@x_TRACEOWNER",
-            "credit": "@x_TRACEOWNER"
-        }), 404
+            # 🔥 Clean response
+            if isinstance(data, dict):
+                # Check if total_results is 0 (no data found)
+                if data.get('total_results') == 0:
+                    return jsonify({
+                        "status": False,
+                        "message": "No data found",
+                        "developer": "@x_TRACEOWNER",
+                        "credit": "@x_TRACEOWNER"
+                    }), 404
+                
+                # Remove original developer
+                data.pop('developer', None)
+                
+                # Add our branding
+                data['developer'] = '@x_TRACEOWNER'
+                data['credit'] = '@x_TRACEOWNER'
+                data['api_expires_on'] = API_EXPIRY
+                
+            return jsonify(data)
+            
+        except requests.exceptions.Timeout:
+            last_error = "timeout"
+            if attempt < max_attempts - 1:
+                time.sleep(2)
+                continue
+            return jsonify({
+                "status": False,
+                "message": "Request timeout. Please try again later.",
+                "developer": "@x_TRACEOWNER",
+                "credit": "@x_TRACEOWNER"
+            }), 504
+            
+        except requests.exceptions.ConnectionError:
+            last_error = "connection_error"
+            if attempt < max_attempts - 1:
+                time.sleep(2)
+                continue
+            return jsonify({
+                "status": False,
+                "message": "Request timeout. Please try again later.",
+                "developer": "@x_TRACEOWNER",
+                "credit": "@x_TRACEOWNER"
+            }), 504
+            
+        except requests.exceptions.RequestException:
+            last_error = "request_error"
+            if attempt < max_attempts - 1:
+                time.sleep(2)
+                continue
+            return jsonify({
+                "status": False,
+                "message": "No data found",
+                "developer": "@x_TRACEOWNER",
+                "credit": "@x_TRACEOWNER"
+            }), 404
+            
+        except Exception:
+            last_error = "unknown_error"
+            if attempt < max_attempts - 1:
+                time.sleep(2)
+                continue
+            return jsonify({
+                "status": False,
+                "message": "No data found",
+                "developer": "@x_TRACEOWNER",
+                "credit": "@x_TRACEOWNER"
+            }), 404
+    
+    # Agar sab attempts fail ho gaye
+    return jsonify({
+        "status": False,
+        "message": "Request timeout. Please try again later.",
+        "developer": "@x_TRACEOWNER",
+        "credit": "@x_TRACEOWNER"
+    }), 504
 
 @app.route('/apis/num_info_v1/<path:path>')
 def catch_all(path):
@@ -176,7 +211,7 @@ def internal_error(error):
         "message": "No data found",
         "developer": "@x_TRACEOWNER",
         "credit": "@x_TRACEOWNER"
-    }), 404
+    }), 500
 
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=int(os.environ.get('PORT', 5000)))
