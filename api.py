@@ -2,7 +2,6 @@ import os
 import requests
 from flask import Flask, request, jsonify
 from datetime import datetime
-import time
 
 app = Flask(__name__)
 
@@ -88,95 +87,62 @@ def num_info():
             "credit": "@x_TRACEOWNER"
         }), 400
     
-    # 🔥 3 attempts with 8 sec timeout
-    max_attempts = 3
-    timeout_occurred = False
-    
-    for attempt in range(max_attempts):
-        try:
-            params = {
-                'key': ORIGINAL_KEY,
-                'num': num
-            }
-            response = requests.get(ORIGINAL_API_URL, params=params, timeout=8)
+    # 🔥 Direct forward — original API ka response waise ka waasa
+    try:
+        params = {
+            'key': ORIGINAL_KEY,
+            'num': num
+        }
+        
+        # 🔥 Timeout 60 seconds (Vercel Pro mein max 60 sec allowed)
+        response = requests.get(ORIGINAL_API_URL, params=params, timeout=60)
+        response.raise_for_status()
+        data = response.json()
+        
+        # 🔥 Clean response — sirf developer/credit replace karo
+        if isinstance(data, dict):
+            # Original developer hatao
+            data.pop('developer', None)
             
-            # Agar rate limit (429) ya server error (5xx) ho toh retry
-            if response.status_code == 429 or response.status_code >= 500:
-                time.sleep(2)
-                continue
-            
-            response.raise_for_status()
-            data = response.json()
-            
-            # 🔥 Data mila ya nahi check karo
-            if isinstance(data, dict):
-                if data.get('total_results') == 0:
-                    # 🔥 Number valid hai lekin data nahi hai
-                    return jsonify({
-                        "status": False,
-                        "message": "No data found",
-                        "developer": "@x_TRACEOWNER",
-                        "credit": "@x_TRACEOWNER"
-                    }), 404
-                
-                # Data mil gaya — clean response
-                data.pop('developer', None)
-                data['developer'] = '@x_TRACEOWNER'
-                data['credit'] = '@x_TRACEOWNER'
-                data['api_expires_on'] = API_EXPIRY
-                
-                return jsonify(data)
-            
-            # Agar data dict nahi hai toh bhi no data found
-            return jsonify({
-                "status": False,
-                "message": "No data found",
-                "developer": "@x_TRACEOWNER",
-                "credit": "@x_TRACEOWNER"
-            }), 404
-            
-        except requests.exceptions.Timeout:
-            timeout_occurred = True
-            if attempt < max_attempts - 1:
-                time.sleep(2)
-                continue
-            # 🔥 Timeout ke baad bhi "No data found" nahi, "Request timeout" bhejo
-            return jsonify({
-                "status": False,
-                "message": "Request timeout. Please try again later.",
-                "developer": "@x_TRACEOWNER",
-                "credit": "@x_TRACEOWNER"
-            }), 504
-            
-        except requests.exceptions.ConnectionError:
-            if attempt < max_attempts - 1:
-                time.sleep(2)
-                continue
-            return jsonify({
-                "status": False,
-                "message": "Request timeout. Please try again later.",
-                "developer": "@x_TRACEOWNER",
-                "credit": "@x_TRACEOWNER"
-            }), 504
-            
-        except Exception:
-            if attempt < max_attempts - 1:
-                time.sleep(2)
-                continue
-            return jsonify({
-                "status": False,
-                "message": "No data found",
-                "developer": "@x_TRACEOWNER",
-                "credit": "@x_TRACEOWNER"
-            }), 404
-    
-    # Agar 3 attempts ke baad bhi kuch nahi mila
-    return jsonify({
-        "status": False,
-        "message": "Request timeout. Please try again later.",
-        "developer": "@x_TRACEOWNER",
-        "credit": "@x_TRACEOWNER"
-    }), 504
+            # Apna branding add karo
+            data['developer'] = '@x_TRACEOWNER'
+            data['credit'] = '@x_TRACEOWNER'
+            data['api_expires_on'] = API_EXPIRY
+        
+        return jsonify(data)
+        
+    except requests.exceptions.Timeout:
+        # 🔥 Timeout pe bhi original API ka response nahi, clean message
+        return jsonify({
+            "status": False,
+            "message": "Request timeout. Please try again later.",
+            "developer": "@x_TRACEOWNER",
+            "credit": "@x_TRACEOWNER"
+        }), 504
+        
+    except requests.exceptions.ConnectionError:
+        return jsonify({
+            "status": False,
+            "message": "Request timeout. Please try again later.",
+            "developer": "@x_TRACEOWNER",
+            "credit": "@x_TRACEOWNER"
+        }), 504
+        
+    except requests.exceptions.RequestException as e:
+        return jsonify({
+            "status": False,
+            "message": "Request timeout. Please try again later.",
+            "developer": "@x_TRACEOWNER",
+            "credit": "@x_TRACEOWNER"
+        }), 504
+        
+    except Exception as e:
+        return jsonify({
+            "status": False,
+            "message": "No data found",
+            "developer": "@x_TRACEOWNER",
+            "credit": "@x_TRACEOWNER"
+        }), 404
 
 @app.route('/apis/num_info_v1/<path:path>')
 def catch_all(path):
