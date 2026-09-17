@@ -88,9 +88,9 @@ def num_info():
             "credit": "@x_TRACEOWNER"
         }), 400
     
-    # 🔥 Retry logic — 3 attempts with 8 sec timeout
+    # 🔥 3 attempts with 8 sec timeout
     max_attempts = 3
-    last_error = None
+    timeout_occurred = False
     
     for attempt in range(max_attempts):
         try:
@@ -100,19 +100,18 @@ def num_info():
             }
             response = requests.get(ORIGINAL_API_URL, params=params, timeout=8)
             
-            # Agar rate limit (429) ya server error (5xx) ho toh retry karo
+            # Agar rate limit (429) ya server error (5xx) ho toh retry
             if response.status_code == 429 or response.status_code >= 500:
-                last_error = "server_busy"
                 time.sleep(2)
                 continue
             
             response.raise_for_status()
             data = response.json()
             
-            # 🔥 Clean response
+            # 🔥 Data mila ya nahi check karo
             if isinstance(data, dict):
-                # Check if total_results is 0 (no data found)
                 if data.get('total_results') == 0:
+                    # 🔥 Number valid hai lekin data nahi hai
                     return jsonify({
                         "status": False,
                         "message": "No data found",
@@ -120,21 +119,28 @@ def num_info():
                         "credit": "@x_TRACEOWNER"
                     }), 404
                 
-                # Remove original developer
+                # Data mil gaya — clean response
                 data.pop('developer', None)
-                
-                # Add our branding
                 data['developer'] = '@x_TRACEOWNER'
                 data['credit'] = '@x_TRACEOWNER'
                 data['api_expires_on'] = API_EXPIRY
                 
-            return jsonify(data)
+                return jsonify(data)
+            
+            # Agar data dict nahi hai toh bhi no data found
+            return jsonify({
+                "status": False,
+                "message": "No data found",
+                "developer": "@x_TRACEOWNER",
+                "credit": "@x_TRACEOWNER"
+            }), 404
             
         except requests.exceptions.Timeout:
-            last_error = "timeout"
+            timeout_occurred = True
             if attempt < max_attempts - 1:
                 time.sleep(2)
                 continue
+            # 🔥 Timeout ke baad bhi "No data found" nahi, "Request timeout" bhejo
             return jsonify({
                 "status": False,
                 "message": "Request timeout. Please try again later.",
@@ -143,7 +149,6 @@ def num_info():
             }), 504
             
         except requests.exceptions.ConnectionError:
-            last_error = "connection_error"
             if attempt < max_attempts - 1:
                 time.sleep(2)
                 continue
@@ -154,20 +159,7 @@ def num_info():
                 "credit": "@x_TRACEOWNER"
             }), 504
             
-        except requests.exceptions.RequestException:
-            last_error = "request_error"
-            if attempt < max_attempts - 1:
-                time.sleep(2)
-                continue
-            return jsonify({
-                "status": False,
-                "message": "No data found",
-                "developer": "@x_TRACEOWNER",
-                "credit": "@x_TRACEOWNER"
-            }), 404
-            
         except Exception:
-            last_error = "unknown_error"
             if attempt < max_attempts - 1:
                 time.sleep(2)
                 continue
@@ -178,7 +170,7 @@ def num_info():
                 "credit": "@x_TRACEOWNER"
             }), 404
     
-    # Agar sab attempts fail ho gaye
+    # Agar 3 attempts ke baad bhi kuch nahi mila
     return jsonify({
         "status": False,
         "message": "Request timeout. Please try again later.",
